@@ -2,68 +2,176 @@ name: Frontend Continuous Deployment
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+    paths:
+      - "starter/frontend/**"
+
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: cluster
+  ECR_REPOSITORY: frontend
+  REACT_APP_MOVIE_API_URL: ${{ secrets.REACT_APP_MOVIE_API_URL }}
+
 jobs:
-  lint-and-test:
+  lint:
+    name: Lint Frontend
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: starter/frontend
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
+
       - name: Setup NodeJS
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
-          node-version: '18'
+          node-version-file: starter/frontend/.nvmrc
+
+      - name: Restore npm cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-frontend-node-${{ hashFiles('starter/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-frontend-node-
+
       - name: Install dependencies
         run: npm ci
+
       - name: Run lint
         run: npm run lint
-      - name: Run tests
-        run: npm test -- --watchAll=false
 
-  build-and-deploy:
-    needs: lint-and-test
+  test:
+    name: Test Frontend
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: starter/frontend
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Setup NodeJS
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: starter/frontend/.nvmrc
+
+      - name: Restore npm cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-frontend-node-${{ hashFiles('starter/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-frontend-node-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: CI=true npm test
+
+  build:
+    name: Build and Push Frontend
+    runs-on: ubuntu-latest
+
+    needs:
+      - lint
+      - test
+
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Log in to Amazon ECR
+      - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and Push Docker Image to ECR
+      - name: Build, tag and push frontend image
+        id: build-image
+        working-directory: starter/frontend
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_FRONTEND }}
           IMAGE_TAG: ${{ github.sha }}
-          MOVIE_API_URL: ${{ secrets.REACT_APP_MOVIE_API_URL }}
         run: |
-          cd starter/frontend
+          set -euo pipefail
+
+          if [ -z "$REACT_APP_MOVIE_API_URL" ]; then
+            echo "REACT_APP_MOVIE_API_URL is not configured."
+            exit 1
+          fi
+
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          echo "Building frontend image: $IMAGE_URI"
+
           docker build \
-            --build-arg REACT_APP_MOVIE_API_URL=$MOVIE_API_URL \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+            --build-arg REACT_APP_MOVIE_API_URL="$REACT_APP_MOVIE_API_URL" \
+            --tag "$IMAGE_URI" \
+            .
 
-      - name: Update Kubeconfig
-        run: |
-          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
+          docker push "$IMAGE_URI"
 
-      - name: Deploy to EKS using kubectl
+          echo "image=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy Frontend to EKS
+    runs-on: ubuntu-latest
+
+    needs:
+      - build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl for EKS
         run: |
-          kubectl set image deployment/frontend-deployment frontend=${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }} || kubectl apply -f starter/k8s/frontend-deployment.yaml
-          kubectl rollout status deployment/frontend-deployment --timeout=180s
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Deploy frontend using Kustomize
+        working-directory: starter/frontend/k8s
+        env:
+          IMAGE_URI: ${{ needs.build.outputs.image }}
+        run: |
+          set -euo pipefail
+
+          kustomize edit set image frontend="$IMAGE_URI"
+          kustomize build | kubectl apply -f -
+
+      - name: Verify frontend rollout
+        run: |
+          kubectl rollout status deployment/frontend --timeout=180s
+          kubectl get deployment frontend
+          kubectl get pods -l app=frontend
+          kubectl get service frontend
