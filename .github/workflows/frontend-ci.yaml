@@ -1,0 +1,80 @@
+name: Frontend Continuous Integration
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: starter/frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Setup NodeJS
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('starter/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - name: Install dependencies
+        run: npm ci
+      - name: Run lint
+        run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: starter/frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Setup NodeJS
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('starter/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - name: Install dependencies
+        run: npm ci
+      - name: Run test
+        run: npm run test -- --watchAll=false
+
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: starter/frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Setup NodeJS
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('starter/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - name: Install dependencies
+        run: npm ci
+      - name: Run docker build
+        run: docker build -t mp-frontend:latest .
