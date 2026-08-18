@@ -67,7 +67,7 @@ jobs:
         run: pipenv install --dev
 
       - name: Run tests
-        run: FAIL_TEST=500 pipenv run test
+        run: pipenv run test
 
   build:
     name: Build Backend
