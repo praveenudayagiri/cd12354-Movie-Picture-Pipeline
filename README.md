@@ -407,6 +407,71 @@ kustomize edit set image backend=<ECR_REPO_URL>:<NEW_TAG_HERE>
 kustomize build | kubectl apply -f -
 ```
 
+## Project Evidence
+
+The following screenshots demonstrate successful CI/CD implementation and deployment of the Movie Picture Pipeline.
+
+### Frontend Continuous Integration
+
+Successful frontend CI pipeline with linting, testing and Docker build:
+
+![Frontend CI Success](evidence/frontend-ci-success.png)
+
+Intentional frontend test failure demonstrating that the build is skipped when tests fail:
+
+![Frontend CI Failure Handling](evidence/frontend-ci-failure.png)
+
+### Backend Continuous Integration
+
+Successful backend CI pipeline with linting, testing and Docker build:
+
+![Backend CI Success](evidence/backend-ci-success.png)
+
+Intentional backend test failure demonstrating that the build is skipped when tests fail:
+
+![Backend CI Failure Handling](evidence/backend-ci-failure.png)
+
+### Backend Continuous Deployment
+
+Successful backend CD workflow including linting, testing, Docker image build, ECR push and EKS deployment:
+
+![Backend CD Success](evidence/backend-cd-success.png)
+
+### Frontend Continuous Deployment
+
+Successful frontend CD workflow including linting, testing, Docker image build, ECR push and EKS deployment:
+
+![Frontend CD Success](evidence/frontend-cd-success.png)
+
+### Amazon ECR Images
+
+Frontend Docker image pushed to Amazon ECR using the Git commit SHA as the image tag:
+
+![Frontend ECR](evidence/frontend-ecr.png)
+
+Backend Docker image pushed to Amazon ECR using the Git commit SHA as the image tag:
+
+![Backend ECR](evidence/backend-ecr.png)
+
+### Kubernetes Deployment
+
+Frontend and backend workloads running successfully on Amazon EKS:
+
+![Kubernetes Running](evidence/kubernetes-running.png)
+
+### Backend API
+
+The deployed backend `/movies` endpoint successfully returns the movie catalogue:
+
+![Backend Working](evidence/backend-working.png)
+
+### Frontend Application
+
+The deployed frontend successfully retrieves and displays the movie catalogue from the backend API:
+
+![Frontend Working](evidence/frontend-working.png)
+
+
 ## License
 
 [License](LICENSE.md)
